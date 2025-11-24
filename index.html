@@ -97,7 +97,7 @@
     <p class="subtitle">Keep the inner piece off the outer ring. Deflect incoming hits with Q W E R.</p>
     <div id="hud">
       <span id="timer">Time: 0.0s</span>
-      <span id="status">Press Space to start</span>
+      <span id="status">Stay off the ring!</span>
     </div>
   </header>
   <canvas id="game" width="800" height="800"></canvas>
@@ -168,12 +168,18 @@
       return interval + Math.random() * 0.6;
     }
 
+    function externalForceMagnitude() {
+      const difficulty = difficultyFactor();
+      const eased = Math.pow(difficulty, 1.35);
+      const minMagnitude = 80;
+      const maxMagnitude = 520;
+      const randomRange = 40 + 100 * eased;
+      return minMagnitude + (maxMagnitude - minMagnitude) * eased + Math.random() * randomRange;
+    }
+
     function applyExternalForce() {
       const angle = Math.random() * Math.PI * 2;
-      const difficulty = difficultyFactor();
-      const minMagnitude = 140;
-      const maxMagnitude = 520;
-      const magnitude = minMagnitude + (maxMagnitude - minMagnitude) * difficulty + Math.random() * 80 * difficulty;
+      const magnitude = externalForceMagnitude();
       piece.vel.x += Math.cos(angle) * magnitude;
       piece.vel.y += Math.sin(angle) * magnitude;
       statusEl.textContent = 'Incoming hit!';
@@ -370,8 +376,9 @@
       }
     });
 
-    // initial render
+    // initial render and auto-start
     render();
+    resetGame();
   </script>
 </body>
 </html>
