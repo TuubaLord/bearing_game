@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Air Jet Bearing Game</title>
+  <style>
+    :root {
+      --bg: #0b4d63;
+      --ring: #0f6b84;
+      --accent: #c3e9f2;
+      --danger: #f4d35e;
+      --text: #f7f9fa;
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 30% 30%, #0b4d63 0%, #052c3a 60%);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    header {
+      padding: 16px 24px 0;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+
+    p.subtitle {
+      margin: 0 0 12px;
+      opacity: 0.8;
+      font-size: 14px;
+    }
+
+    #hud {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    #hud span {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 6px 10px;
+      border-radius: 8px;
+    }
+
+    canvas {
+      width: min(90vmin, 720px);
+      height: min(90vmin, 720px);
+      aspect-ratio: 1;
+      border-radius: 8px;
+      box-shadow: 0 20px 80px rgba(0, 0, 0, 0.35);
+    }
+
+    #controls {
+      margin: 12px 0 20px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      font-size: 14px;
+    }
+
+    #controls span {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+
+    #status {
+      margin-top: 8px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Air Tank Bearing Balance</h1>
+    <p class="subtitle">Keep the inner piece off the outer ring. Deflect incoming hits with Q W E R.</p>
+    <div id="hud">
+      <span id="timer">Time: 0.0s</span>
+      <span id="status">Press Space to start</span>
+    </div>
+  </header>
+  <canvas id="game" width="800" height="800"></canvas>
+  <div id="controls">
+    <span>Q: Top jet (pushes down)</span>
+    <span>W: Right jet (pushes left)</span>
+    <span>E: Bottom jet (pushes up)</span>
+    <span>R: Left jet (pushes right)</span>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const timerEl = document.getElementById('timer');
+    const statusEl = document.getElementById('status');
+
+    const CENTER = { x: canvas.width / 2, y: canvas.height / 2 };
+    const OUTER_RADIUS = 240;
+    const OUTER_THICKNESS = 38;
+    const INNER_RADIUS = 120;
+    const TARGET_RADIUS = OUTER_RADIUS - OUTER_THICKNESS - 8; // safety gap
+
+    let piece = {
+      pos: { x: 0, y: 0 },
+      vel: { x: 0, y: 0 },
+      angle: 0,
+    };
+
+    let playing = false;
+    let lastTime = performance.now();
+    let elapsed = 0;
+    let externalTimer = 0;
+    let gameOver = false;
+
+    const jets = {
+      q: { dir: { x: 0, y: 1 } }, // from top pushing downwards
+      w: { dir: { x: -1, y: 0 } }, // from right pushing left
+      e: { dir: { x: 0, y: -1 } }, // from bottom pushing up
+      r: { dir: { x: 1, y: 0 } }, // from left pushing right
+    };
+
+    const input = { q: false, w: false, e: false, r: false };
+
+    function resetGame() {
+      piece = {
+        pos: { x: 0, y: 0 },
+        vel: { x: 0, y: 0 },
+        angle: 0,
+      };
+      elapsed = 0;
+      externalTimer = 0;
+      playing = true;
+      gameOver = false;
+      statusEl.textContent = 'Stay off the ring!';
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
+    }
+
+    function applyExternalForce() {
+      const angle = Math.random() * Math.PI * 2;
+      const magnitude = 240 + Math.random() * 260;
+      piece.vel.x += Math.cos(angle) * magnitude;
+      piece.vel.y += Math.sin(angle) * magnitude;
+      statusEl.textContent = 'Incoming hit!';
+    }
+
+    function applyJets(dt) {
+      const force = 900; // strong but controllable
+      Object.entries(jets).forEach(([key, jet]) => {
+        if (input[key]) {
+          piece.vel.x += jet.dir.x * force * dt;
+          piece.vel.y += jet.dir.y * force * dt;
+        }
+      });
+    }
+
+    function step(dt) {
+      // physics integration
+      piece.vel.x *= 0.985;
+      piece.vel.y *= 0.985;
+
+      piece.pos.x += piece.vel.x * dt;
+      piece.pos.y += piece.vel.y * dt;
+
+      // gentle drift back toward center
+      piece.vel.x += -piece.pos.x * 0.9 * dt;
+      piece.vel.y += -piece.pos.y * 0.9 * dt;
+
+      // update rotation
+      piece.angle += dt * 1.6;
+
+      // external force timer
+      externalTimer -= dt;
+      if (externalTimer <= 0) {
+        applyExternalForce();
+        externalTimer = 1.2 + Math.random() * 1.4;
+      }
+
+      // check collision
+      const dist = Math.hypot(piece.pos.x, piece.pos.y);
+      if (dist + INNER_RADIUS >= TARGET_RADIUS) {
+        playing = false;
+        gameOver = true;
+        statusEl.textContent = 'Collision! Press Space to retry.';
+      }
+    }
+
+    function drawRing() {
+      ctx.save();
+      ctx.translate(CENTER.x, CENTER.y);
+
+      // outer ring body
+      ctx.lineWidth = OUTER_THICKNESS;
+      ctx.strokeStyle = '#0b4d63';
+      ctx.beginPath();
+      ctx.arc(0, 0, OUTER_RADIUS, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // inner channel highlight
+      ctx.lineWidth = 12;
+      ctx.strokeStyle = '#0f6b84';
+      ctx.beginPath();
+      ctx.arc(0, 0, OUTER_RADIUS - OUTER_THICKNESS / 2, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawJets() {
+      const positions = [
+        { x: 0, y: -OUTER_RADIUS - 20, label: 'Air' },
+        { x: OUTER_RADIUS + 20, y: 0, label: 'Air' },
+        { x: 0, y: OUTER_RADIUS + 20, label: 'Air' },
+        { x: -OUTER_RADIUS - 20, y: 0, label: 'Air' },
+      ];
+      const angles = [Math.PI * -0.25, Math.PI * 0.25, Math.PI * 0.75, Math.PI * -0.75];
+      const keys = ['Q', 'W', 'E', 'R'];
+
+      ctx.save();
+      ctx.translate(CENTER.x, CENTER.y);
+      positions.forEach((p, i) => {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(angles[i]);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.strokeStyle = '#e3f5ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.rect(-24, -24, 48, 48);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#e3f5ff';
+        ctx.font = 'bold 14px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Air', 0, -4);
+        ctx.font = '12px Inter, sans-serif';
+        ctx.fillText(keys[i], 0, 12);
+        ctx.restore();
+      });
+      ctx.restore();
+    }
+
+    function drawPiece() {
+      ctx.save();
+      ctx.translate(CENTER.x + piece.pos.x, CENTER.y + piece.pos.y);
+      ctx.rotate(piece.angle);
+
+      // body
+      ctx.fillStyle = '#0b708b';
+      ctx.beginPath();
+      ctx.arc(0, 0, INNER_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+
+      // accent ring
+      ctx.strokeStyle = '#0d8aa8';
+      ctx.lineWidth = 18;
+      ctx.beginPath();
+      ctx.arc(0, 0, INNER_RADIUS - 22, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // rotating spokes
+      ctx.strokeStyle = 'rgba(227,245,255,0.75)';
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      for (let i = 0; i < 3; i++) {
+        const a = (Math.PI * 2 * i) / 3;
+        ctx.moveTo(Math.cos(a) * (INNER_RADIUS - 16), Math.sin(a) * (INNER_RADIUS - 16));
+        ctx.lineTo(Math.cos(a + Math.PI / 8) * (INNER_RADIUS - 60), Math.sin(a + Math.PI / 8) * (INNER_RADIUS - 60));
+      }
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawBoundsWarning() {
+      const dist = Math.hypot(piece.pos.x, piece.pos.y);
+      const danger = dist + INNER_RADIUS >= TARGET_RADIUS * 0.92;
+      if (!danger) return;
+      ctx.save();
+      ctx.translate(CENTER.x, CENTER.y);
+      ctx.strokeStyle = danger ? '#f4d35e' : '#c3e9f2';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([10, 10]);
+      ctx.beginPath();
+      ctx.arc(0, 0, TARGET_RADIUS, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawRing();
+      drawJets();
+      drawBoundsWarning();
+      drawPiece();
+    }
+
+    function loop(now) {
+      if (!playing) return;
+      const dt = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
+
+      elapsed += dt;
+      timerEl.textContent = `Time: ${elapsed.toFixed(1)}s`;
+
+      applyJets(dt);
+      step(dt);
+      render();
+
+      if (!gameOver) {
+        requestAnimationFrame(loop);
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      if (['q', 'w', 'e', 'r'].includes(key)) {
+        input[key] = true;
+      }
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (!playing) {
+          resetGame();
+        }
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      const key = e.key.toLowerCase();
+      if (['q', 'w', 'e', 'r'].includes(key)) {
+        input[key] = false;
+      }
+    });
+
+    // initial render
+    render();
+  </script>
+</body>
+</html>
